@@ -1,0 +1,17 @@
+{
+    "name": "NAVDatabase.Amx.EpsonESC-VP21Business",
+    "description": "NetLinx module for Epson ESC/VP21 Business projectors",
+    "version": "0.0.0",
+    "license": "MIT",
+    "files": ["src/*.tko", "SymLink.ps1", "LICENSE", "README.md"],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/Norgate-AV/NAVDatabase.Amx.EpsonESC-VP21Business.git"
+    },
+    "bugs": {
+        "url": "https://github.com/Norgate-AV/NAVDatabase.Amx.EpsonESC-VP21Business/issues"
+    },
+    "dependencies": {
+        "NAVFoundation.Amx": "latest"
+    }
+}
