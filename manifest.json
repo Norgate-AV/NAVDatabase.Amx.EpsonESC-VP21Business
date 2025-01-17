@@ -1,7 +1,7 @@
 {
     "name": "NAVDatabase.Amx.EpsonESC-VP21Business",
     "description": "NetLinx module for Epson ESC/VP21 Business projector control",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "license": "MIT",
     "files": ["src/*.axs", "src/*.tko", "lib/*.axi", "SymLink.ps1", "LICENSE", "README.md"],
     "repository": {
