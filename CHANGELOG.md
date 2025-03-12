@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.0](https://github.com/Norgate-AV/NAVDatabase.Amx.EpsonESC-VP21Business/compare/v1.0.1...v1.1.0) (2025-03-12)
+
+### 🌟 Features
+
+- update to support NAVFoundation.Amx v2.0.0 ([2de04d9](https://github.com/Norgate-AV/NAVDatabase.Amx.EpsonESC-VP21Business/commit/2de04d9e2dd04085929b158adf1931d27d1f5fc2))
+
 ## [1.0.1](https://github.com/Norgate-AV/NAVDatabase.Amx.EpsonESC-VP21Business/compare/v1.0.0...v1.0.1) (2025-01-17)
 
 ### 🐛 Bug Fixes
