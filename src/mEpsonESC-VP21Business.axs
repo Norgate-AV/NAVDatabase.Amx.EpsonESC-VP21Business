@@ -6,6 +6,9 @@ MODULE_NAME='mEpsonESC-VP21Business'    (
 (***********************************************************)
 #include 'NAVFoundation.ModuleBase.axi'
 #include 'NAVFoundation.SocketUtils.axi'
+#include 'NAVFoundation.StringUtils.axi'
+#include 'NAVFoundation.TimelineUtils.axi'
+#include 'NAVFoundation.ErrorLogUtils.axi'
 
 /*
  _   _                       _          ___     __
@@ -50,6 +53,9 @@ DEFINE_CONSTANT
 
 constant long TL_DRIVE    = 1
 constant long TL_SOCKET_CHECK = 2
+
+constant long TL_DRIVE_INTERVAL[] = { 200 }
+constant long TL_SOCKET_CHECK_INTERVAL[] = { 3000 }    //3 seconds
 
 constant integer REQUIRED_POWER_ON    = 1
 constant integer REQUIRED_POWER_OFF    = 2
@@ -134,31 +140,28 @@ DEFINE_TYPE
 (***********************************************************)
 DEFINE_VARIABLE
 
-volatile long driveTicks[] = { 200 }
-volatile long socketCheck[] = { 3000 }    //3 seconds
-
 volatile _NAVProjector uProj
 
-volatile integer commandBusy
+volatile char commandBusy
 volatile integer loop
 
-volatile integer semaphore
+volatile char semaphore
 volatile char rxBuffer[NAV_MAX_BUFFER]
 
 volatile integer pollSequence = GET_POWER
 
 volatile char ipAddress[15]
 volatile integer ipPort
-volatile integer ipConnected
+volatile char ipConnected
 
-volatile integer communicating
-volatile integer initialized
+volatile char communicating
+volatile char initialized
 
-volatile integer autoAdjustRequired
+volatile char autoAdjustRequired
 
-volatile integer inputInitialized = false
+volatile char inputInitialized = false
 
-volatile integer queryLockOut
+volatile char queryLockOut
 
 (***********************************************************)
 (*               LATCHING DEFINITIONS GO BELOW             *)
@@ -175,11 +178,14 @@ DEFINE_MUTUALLY_EXCLUSIVE
 (***********************************************************)
 (* EXAMPLE: DEFINE_FUNCTION <RETURN_TYPE> <NAME> (<PARAMETERS>) *)
 (* EXAMPLE: DEFINE_CALL '<NAME>' (<PARAMETERS>) *)
+
 define_function SendStringRaw(char payload[]) {
-    NAVErrorLog(NAV_LOG_LEVEL_DEBUG,
-                NAVFormatStandardLogMessage(NAV_STANDARD_LOG_MESSAGE_TYPE_STRING_TO,
-                                            dvPort,
-                                            payload))
+    if (dvPort.NUMBER == 0) {
+        NAVErrorLog(NAV_LOG_LEVEL_DEBUG,
+                    NAVFormatStandardLogMessage(NAV_STANDARD_LOG_MESSAGE_TYPE_STRING_TO,
+                                                dvPort,
+                                                payload))
+    }
 
     send_string dvPort, "payload"
 }
@@ -203,7 +209,7 @@ define_function SendQuery(integer query) {
 
 define_function TimeOut() {
     cancel_wait 'CommsTimeOut'
-    wait 300 'CommsTimeOut' { communicating = false }
+    wait 300 'CommsTimeOut' { communicating = false; UpdateFeedback() }
 }
 
 
@@ -246,24 +252,26 @@ define_function Process() {
             continue
         }
 
-        NAVErrorLog(NAV_LOG_LEVEL_DEBUG,
-                    NAVFormatStandardLogMessage(NAV_STANDARD_LOG_MESSAGE_TYPE_PARSING_STRING_FROM,
-                                                dvPort,
-                                                data))
+        if (dvPort.NUMBER == 0) {
+            NAVErrorLog(NAV_LOG_LEVEL_DEBUG,
+                        NAVFormatStandardLogMessage(NAV_STANDARD_LOG_MESSAGE_TYPE_PARSING_STRING_FROM,
+                                                    dvPort,
+                                                    data))
+        }
 
-        data = NAVStripCharsFromRight(data, 1)    //Removes :
+        data = NAVStripRight(data, 1)    //Removes :
 
         if (!length_array(data)) {
             continue
         }
 
-        data = NAVStripCharsFromRight(data, 1)    //Removes CR
+        data = NAVStripRight(data, 1)    //Removes CR
 
         if (!length_array(data)) {
             continue
         }
 
-        cmd = NAVStripCharsFromRight(remove_string(data, '=', 1), 1)
+        cmd = NAVStripRight(remove_string(data, '=', 1), 1)
 
         switch (cmd) {
             case 'PWR': {
@@ -286,6 +294,8 @@ define_function Process() {
                     case '03': { uProj.Display.PowerState.Actual = ACTUAL_POWER_COOLING; pollSequence = GET_LAMP }
                     case '05': { uProj.Display.PowerState.Actual = ACTUAL_POWER_ABNORMAL_STANDBY; pollSequence = GET_LAMP }
                 }
+
+                UpdateFeedback()
             }
             case 'SOURCE': {
                 switch (hextoi(data)) {
@@ -301,6 +311,8 @@ define_function Process() {
                     case INPUT_COMMAND_BYTE_HD_BASE_T: { uProj.Display.Input.Actual = ACTUAL_INPUT_HD_BASE_T; send_string vdvObject, "'INPUT-HD_BASE_T, 1'" }
                     case INPUT_COMMAND_BYTE_SDI_1: { uProj.Display.Input.Actual = ACTUAL_INPUT_SDI_1; send_string vdvObject, "'INPUT-SDI, 1'" }
                 }
+
+                UpdateFeedback()
 
                 pollSequence = GET_POWER
             }
@@ -334,6 +346,8 @@ define_function Process() {
                     case 'ON': { uProj.Display.Volume.Mute.Actual = ACTUAL_MUTE_ON }
                     case 'OFF': { uProj.Display.Volume.Mute.Actual = ACTUAL_MUTE_OFF }
                 }
+
+                UpdateFeedback()
 
                 pollSequence = GET_POWER
             }
@@ -446,6 +460,28 @@ define_function MaintainSocketConnection() {
     NAVClientSocketOpen(dvPort.PORT, ipAddress, ipPort, IP_TCP)
 }
 
+
+define_function UpdateFeedback() {
+    [vdvObject, DEVICE_COMMUNICATING]    = (communicating)
+    [vdvObject, DATA_INITIALIZED]    = (initialized)
+    [vdvObject, VOL_MUTE_FB] = (uProj.Display.VideoMute.Actual == ACTUAL_MUTE_ON)
+    [vdvObject, POWER_FB] = (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON)
+    [vdvObject, LAMP_WARMING_FB]    = (uProj.Display.PowerState.Actual = ACTUAL_POWER_WARMING)
+    [vdvObject, LAMP_COOLING_FB]    = (uProj.Display.PowerState.Actual = ACTUAL_POWER_COOLING)
+
+    [vdvObject, 31]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_VGA_1) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
+    [vdvObject, 32]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_VGA_2) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
+    [vdvObject, 33]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_RGBHV_1) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
+    [vdvObject, 34]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_RGBHV_2) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
+    [vdvObject, 35]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_HDMI_1) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
+    [vdvObject, 36]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_DVI_1) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
+    [vdvObject, 37]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_SVIDEO_1) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
+    [vdvObject, 38]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_VIDEO_1) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
+    [vdvObject, 39]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_HD_BASE_T) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
+    [vdvObject, 40]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_SDI_1) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
+}
+
+
 (***********************************************************)
 (*                STARTUP CODE GOES BELOW                  *)
 (***********************************************************)
@@ -473,20 +509,27 @@ data_event[dvPort] {
 
         if (data.device.number == 0) {
             ipConnected = true
+            UpdateFeedback()
         }
 
-        NAVTimelineStart(TL_DRIVE, driveTicks, TIMELINE_ABSOLUTE, TIMELINE_REPEAT)
+        NAVTimelineStart(TL_DRIVE,
+                        TL_DRIVE_INTERVAL,
+                        TIMELINE_ABSOLUTE,
+                        TIMELINE_REPEAT)
     }
     string: {
         communicating = true
         initialized = true
+        UpdateFeedback()
 
         TimeOut()
 
-        NAVErrorLog(NAV_LOG_LEVEL_DEBUG,
+        if (data.device.number == 0) {
+            NAVErrorLog(NAV_LOG_LEVEL_DEBUG,
                     NAVFormatStandardLogMessage(NAV_STANDARD_LOG_MESSAGE_TYPE_STRING_FROM,
                                                 dvPort,
                                                 data.text))
+        }
 
         if (!semaphore) { Process() }
     }
@@ -494,6 +537,7 @@ data_event[dvPort] {
         if (data.device.number == 0) {
             NAVClientSocketClose(dvPort.port)
             ipConnected = false
+            UpdateFeedback()
         }
     }
     onerror: {
@@ -514,11 +558,6 @@ data_event[vdvObject] {
         stack_var char cmdHeader[NAV_MAX_CHARS]
         stack_var char cmdParam[2][NAV_MAX_CHARS]
 
-        NAVErrorLog(NAV_LOG_LEVEL_DEBUG,
-                    NAVFormatStandardLogMessage(NAV_STANDARD_LOG_MESSAGE_TYPE_COMMAND_FROM,
-                                                data.device,
-                                                data.text))
-
         cmdHeader = DuetParseCmdHeader(data.text)
         cmdParam[1] = DuetParseCmdParam(data.text)
         cmdParam[2] = DuetParseCmdParam(data.text)
@@ -531,7 +570,10 @@ data_event[vdvObject] {
                     }
                     case 'TCP_PORT': {
                         ipPort = atoi(cmdParam[2])
-                        NAVTimelineStart(TL_SOCKET_CHECK, socketCheck, timeline_absolute, timeline_repeat)
+                        NAVTimelineStart(TL_SOCKET_CHECK,
+                                        TL_SOCKET_CHECK_INTERVAL,
+                                        TIMELINE_ABSOLUTE,
+                                        TIMELINE_REPEAT)
                     }
                 }
             }
@@ -678,27 +720,7 @@ timeline_event[TL_DRIVE] { Drive() }
 timeline_event[TL_SOCKET_CHECK] { MaintainSocketConnection() }
 
 
-timeline_event[TL_NAV_FEEDBACK] {
-    [vdvObject, DEVICE_COMMUNICATING]    = (communicating)
-    [vdvObject, DATA_INITIALIZED]    = (initialized)
-    [vdvObject, VOL_MUTE_FB] = (uProj.Display.VideoMute.Actual == ACTUAL_MUTE_ON)
-    [vdvObject, POWER_FB] = (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON)
-    [vdvObject, LAMP_WARMING_FB]    = (uProj.Display.PowerState.Actual = ACTUAL_POWER_WARMING)
-    [vdvObject, LAMP_COOLING_FB]    = (uProj.Display.PowerState.Actual = ACTUAL_POWER_COOLING)
-    [vdvObject, 31]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_VGA_1) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
-    [vdvObject, 32]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_VGA_2) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
-    [vdvObject, 33]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_RGBHV_1) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
-    [vdvObject, 34]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_RGBHV_2) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
-    [vdvObject, 35]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_HDMI_1) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
-    [vdvObject, 36]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_DVI_1) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
-    [vdvObject, 37]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_SVIDEO_1) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
-    [vdvObject, 38]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_VIDEO_1) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
-    [vdvObject, 39]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_HD_BASE_T) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
-    [vdvObject, 40]    = ((uProj.Display.Input.Actual == ACTUAL_INPUT_SDI_1) && (uProj.Display.PowerState.Actual == ACTUAL_POWER_ON))
-}
-
 (***********************************************************)
 (*                     END OF PROGRAM                      *)
 (*        DO NOT PUT ANY CODE BELOW THIS COMMENT           *)
 (***********************************************************)
-
